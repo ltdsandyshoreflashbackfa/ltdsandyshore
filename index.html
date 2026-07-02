@@ -304,6 +304,17 @@
   </div>
 
   <div class="panel" id="ppanel-stock" hidden>
+    <div class="card">
+      <h2>Ajouter un produit</h2>
+      <div class="facture-form" style="grid-template-columns:2fr 1fr 1fr auto;">
+        <div class="field" style="margin-bottom:0;"><label>Nom du produit</label><input id="p-nom" type="text" placeholder="Ex: Burger"></div>
+        <div class="field" style="margin-bottom:0;"><label>Prix ($)</label><input id="p-prix" type="number" min="0" step="0.01" placeholder="350"></div>
+        <div class="field" style="margin-bottom:0;"><label>Stock disponible</label><input id="p-stock" type="number" min="0" placeholder="2"></div>
+        <button class="btn yellow" onclick="ajouterProduit()">Ajouter</button>
+      </div>
+      <div id="p-err" class="err" hidden></div>
+    </div>
+    <div class="card"><h2>Catalogue produits</h2><div id="produits-list"></div></div>
     <div class="card"><h2>Ruptures de stock signalées</h2><div id="patron-stock-list"></div></div>
     <div class="card"><h2>Historique résolu</h2><div id="patron-stock-resolu"></div></div>
   </div>
@@ -364,16 +375,16 @@
       <h2><span class="eyebrow">01</span> Nouvelle facture</h2>
       <div class="facture-form">
         <div class="field" style="margin-bottom:0;">
-          <label>Nom du produit</label>
-          <input id="f-nom" type="text" placeholder="Ex: Burger">
+          <label>Produit</label>
+          <select id="f-produit" onchange="updateFacturePreview()"><option value="">— Choisir —</option></select>
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Quantité vendue</label>
-          <input id="f-qte" type="number" min="1" placeholder="20">
+          <input id="f-qte" type="number" min="1" placeholder="20" oninput="updateFacturePreview()">
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label>Prix total vendu ($)</label>
-          <input id="f-prix" type="number" min="0" step="0.01" placeholder="20">
+          <label>Prix total ($)</label>
+          <input id="f-prix" type="text" readonly style="background:var(--paper-2);">
         </div>
         <button class="btn yellow" onclick="addFacture()">Ajouter</button>
       </div>
@@ -488,6 +499,7 @@ async function doLogin(){
     await loadTravailleurs();
   } else {
     document.getElementById('app').hidden = false;
+    await loadCatalogue();
     await loadAll();
   }
 }
@@ -528,11 +540,12 @@ async function openTravailleur(id){
   const svcs = sRes.data || [];
   const facs = fRes.data || [];
   const livs = lRes.data || [];
+  const enService = svcs.some(s => !s.ended_at);
   const total = facs.reduce((a,f)=>a+Number(f.prix_total),0) + livs.reduce((a,l)=>a+Number(l.total),0);
   const perso = total*0.2;
   const totalSecs = svcs.reduce((a,s)=>a+serviceDurationSeconds(s),0);
   document.getElementById('travailleur-detail').innerHTML = `
-    <div class="card"><h2>${escapeHtml(t.nom_complet)} (@${escapeHtml(t.username)})</h2></div>
+    <div class="card"><h2>${escapeHtml(t.nom_complet)} (@${escapeHtml(t.username)}) <span class="status-pill" style="display:inline-flex; vertical-align:middle; margin-left:10px;"><span class="dot ${enService ? 'on' : ''}"></span>${enService ? 'En service' : 'Hors service'}</span></h2></div>
     <div class="stat-grid">
       <div class="stat-card money"><div class="eyebrow">Chiffre d'entreprise</div><div class="num">${money(total)}</div></div>
       <div class="stat-card perso"><div class="eyebrow">Chiffre personnel (20%)</div><div class="num">${money(perso)}</div></div>
@@ -671,7 +684,7 @@ function switchPTab(tab){
   });
   if(tab === 'gestion') renderGestionList();
   if(tab === 'livraison') loadPatronLivraisons();
-  if(tab === 'stock') loadPatronStock();
+  if(tab === 'stock'){ loadPatronStock(); renderProduitsListPatron(); }
 }
 
 // ---------- pointeuse ----------
@@ -859,27 +872,47 @@ function renderServicesHistory(){
 
 // ---------- factures ----------
 async function addFacture(){
-  const nom = document.getElementById('f-nom').value.trim();
+  const sel = document.getElementById('f-produit');
+  const nom = sel.value;
   const qte = parseFloat(document.getElementById('f-qte').value);
   const prix = parseFloat(document.getElementById('f-prix').value);
   const errEl = document.getElementById('f-err');
   errEl.hidden = true;
 
   if(!nom || !qte || qte <= 0 || isNaN(prix) || prix < 0){
-    errEl.textContent = "Renseigne un nom, une quantité (>0) et un prix total valides.";
+    errEl.textContent = "Choisis un produit et une quantité valide.";
     errEl.hidden = false;
     return;
   }
   try{
     const { error } = await sb.from('factures').insert({ nom, quantite: qte, prix_total: prix, travailleur_id: currentUser.id });
     if(error) throw error;
-    document.getElementById('f-nom').value = '';
+    sel.value = '';
     document.getElementById('f-qte').value = '';
     document.getElementById('f-prix').value = '';
     await loadAll();
   }catch(e){
     errEl.textContent = "Erreur : " + (e.message || e);
     errEl.hidden = false;
+  }
+}
+
+function updateFacturePreview(){
+  const sel = document.getElementById('f-produit');
+  const qte = parseFloat(document.getElementById('f-qte').value) || 0;
+  const p = (window._catalogue || []).find(x => x.nom === sel.value);
+  const total = p ? p.prix * qte : 0;
+  document.getElementById('f-prix').value = total ? total.toFixed(2) : '';
+}
+
+async function loadCatalogue(){
+  const { data } = await sb.from('produits').select('*').order('nom');
+  window._catalogue = data || [];
+  const sel = document.getElementById('f-produit');
+  if(sel){
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Choisir —</option>' + window._catalogue.map(p => `<option value="${escapeHtml(p.nom)}">${escapeHtml(p.nom)} — ${money(Number(p.prix))} (stock: ${p.stock})</option>`).join('');
+    sel.value = current;
   }
 }
 
@@ -1135,6 +1168,62 @@ async function loadPatronLivraisons(){
   el.innerHTML = data.map(l => `<div class="week-block"><div class="week-header"><span class="range">${escapeHtml(l.travailleurs ? l.travailleurs.nom_complet : '—')}</span><span class="summary">${new Date(l.heure_depart).toLocaleString('fr-FR')} → ${new Date(l.heure_retour).toLocaleString('fr-FR')} · ${money(Number(l.total))}</span></div>
     <div class="week-body">${l.produits.map(p => `<div class="receipt-line"><span class="name">${escapeHtml(p.nom)}</span><span class="qty">x${p.quantite}</span><span class="dots"></span><span class="amt">${money(Number(p.prix))}</span></div>`).join('')}</div>
   </div>`).join('');
+}
+
+// ---------- catalogue produits (patronne) ----------
+async function ajouterProduit(){
+  const nom = document.getElementById('p-nom').value.trim();
+  const prix = parseFloat(document.getElementById('p-prix').value);
+  const stock = parseInt(document.getElementById('p-stock').value);
+  const errEl = document.getElementById('p-err');
+  errEl.hidden = true;
+  if(!nom || isNaN(prix) || prix < 0 || isNaN(stock) || stock < 0){
+    errEl.textContent = 'Renseigne un nom, un prix et un stock valides.';
+    errEl.hidden = false;
+    return;
+  }
+  const { error } = await sb.from('produits').insert({ nom, prix, stock });
+  if(error){ errEl.textContent = 'Erreur : ' + error.message; errEl.hidden = false; return; }
+  document.getElementById('p-nom').value = '';
+  document.getElementById('p-prix').value = '';
+  document.getElementById('p-stock').value = '';
+  await renderProduitsListPatron();
+}
+
+async function renderProduitsListPatron(){
+  const { data } = await sb.from('produits').select('*').order('nom');
+  window._produits = data || [];
+  const el = document.getElementById('produits-list');
+  if(!window._produits.length){ el.innerHTML = '<div class="empty">Aucun produit dans le catalogue.</div>'; return; }
+  el.innerHTML = window._produits.map(p => `<div class="week-block">
+    <div class="week-header"><span class="range">${escapeHtml(p.nom)}</span><span class="summary">${money(Number(p.prix))} · stock: ${p.stock}</span></div>
+    <div class="week-body" id="pedit-${p.id}" hidden>
+      <div class="field"><label>Nom</label><input id="pe-nom-${p.id}" type="text" value="${escapeHtml(p.nom)}"></div>
+      <div class="field"><label>Prix ($)</label><input id="pe-prix-${p.id}" type="number" min="0" step="0.01" value="${p.prix}"></div>
+      <div class="field"><label>Stock disponible</label><input id="pe-stock-${p.id}" type="number" min="0" value="${p.stock}"></div>
+      <button class="btn yellow" onclick="saveProduit('${p.id}')">Enregistrer</button>
+    </div>
+    <div style="display:flex; gap:8px; padding:0 16px 14px;">
+      <button class="btn ghost" onclick="document.getElementById('pedit-${p.id}').hidden = !document.getElementById('pedit-${p.id}').hidden">Modifier</button>
+      <button class="btn red" onclick="deleteProduit('${p.id}')">Supprimer</button>
+    </div>
+  </div>`).join('');
+}
+
+async function saveProduit(id){
+  const nom = document.getElementById('pe-nom-'+id).value.trim();
+  const prix = parseFloat(document.getElementById('pe-prix-'+id).value);
+  const stock = parseInt(document.getElementById('pe-stock-'+id).value);
+  const { error } = await sb.from('produits').update({ nom, prix, stock }).eq('id', id);
+  if(error){ alert('Erreur : ' + error.message); return; }
+  await renderProduitsListPatron();
+}
+
+async function deleteProduit(id){
+  if(!confirm('Supprimer ce produit du catalogue ?')) return;
+  const { error } = await sb.from('produits').delete().eq('id', id);
+  if(error){ alert('Erreur : ' + error.message); return; }
+  await renderProduitsListPatron();
 }
 
 // ---------- stock ----------
