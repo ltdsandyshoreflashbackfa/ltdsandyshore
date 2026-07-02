@@ -971,9 +971,24 @@ async function addFacture(){
     errEl.hidden = false;
     return;
   }
+
+  const produit = (window._catalogue || []).find(x => x.nom === nom);
+  if(produit && qte > produit.stock){
+    errEl.textContent = `Stock insuffisant pour "${nom}" (disponible : ${produit.stock}).`;
+    errEl.hidden = false;
+    return;
+  }
+
   try{
     const { error } = await sb.from('factures').insert({ nom, quantite: qte, prix_total: prix, travailleur_id: currentUser.id });
     if(error) throw error;
+
+    if(produit){
+      const nouveauStock = Math.max(0, produit.stock - qte);
+      const { error: stockErr } = await sb.from('produits').update({ stock: nouveauStock }).eq('id', produit.id);
+      if(!stockErr) produit.stock = nouveauStock;
+    }
+
     document.getElementById('f-produit-nom').value = '';
     document.getElementById('f-produit-btn-label').textContent = currentCategorieFacture ? '— Choisir un produit —' : '— Choisir une catégorie d\'abord —';
     document.getElementById('f-qte').value = '';
@@ -1075,8 +1090,19 @@ function selectProduitFacture(id){
 
 async function deleteFacture(id){
   if(!confirm('Supprimer cette facture ?')) return;
+  const f = factures.find(x => String(x.id) === String(id));
   const { error } = await sb.from('factures').delete().eq('id', id);
   if(error){ alert('Erreur : ' + error.message); return; }
+
+  if(f){
+    const produit = (window._catalogue || []).find(x => x.nom === f.nom);
+    if(produit){
+      const nouveauStock = produit.stock + Number(f.quantite);
+      const { error: stockErr } = await sb.from('produits').update({ stock: nouveauStock }).eq('id', produit.id);
+      if(!stockErr) produit.stock = nouveauStock;
+    }
+  }
+
   await loadAll();
 }
 
