@@ -115,7 +115,7 @@
   #config-screen .card p{ font-size:13px; color:var(--muted-2); line-height:1.6; }
   .field{ margin-bottom:14px; }
   .field label{ display:block; font-size:11.5px; font-family:'Space Mono',monospace; text-transform:uppercase; letter-spacing:1px; color:var(--muted-2); margin-bottom:5px;}
-  .field input{
+  .field input, .field select{
     width:100%; padding:10px 12px; border:1px solid var(--ink); background:#fff; color:var(--ink); font-size:13.5px;
   }
   .btn{
@@ -306,10 +306,17 @@
   <div class="panel" id="ppanel-stock" hidden>
     <div class="card">
       <h2>Ajouter un produit</h2>
-      <div class="facture-form" style="grid-template-columns:2fr 1fr 1fr auto;">
+      <div class="facture-form" style="grid-template-columns:2fr 1fr 1fr 1fr auto;">
         <div class="field" style="margin-bottom:0;"><label>Nom du produit</label><input id="p-nom" type="text" placeholder="Ex: Burger"></div>
         <div class="field" style="margin-bottom:0;"><label>Prix ($)</label><input id="p-prix" type="number" min="0" step="0.01" placeholder="350"></div>
         <div class="field" style="margin-bottom:0;"><label>Stock disponible</label><input id="p-stock" type="number" min="0" placeholder="2"></div>
+        <div class="field" style="margin-bottom:0;"><label>Catégorie</label>
+          <select id="p-categorie">
+            <option value="Nourriture">Nourriture</option>
+            <option value="Boisson">Boisson</option>
+            <option value="Autres">Autres</option>
+          </select>
+        </div>
         <button class="btn yellow" onclick="ajouterProduit()">Ajouter</button>
       </div>
       <div id="p-err" class="err" hidden></div>
@@ -911,7 +918,16 @@ async function loadCatalogue(){
   const sel = document.getElementById('f-produit');
   if(sel){
     const current = sel.value;
-    sel.innerHTML = '<option value="">— Choisir —</option>' + window._catalogue.map(p => `<option value="${escapeHtml(p.nom)}">${escapeHtml(p.nom)} — ${money(Number(p.prix))} (stock: ${p.stock})</option>`).join('');
+    const ordre = ['Nourriture','Boisson','Autres'];
+    const groupes = {};
+    window._catalogue.forEach(p => {
+      const cat = ordre.includes(p.categorie) ? p.categorie : 'Autres';
+      if(!groupes[cat]) groupes[cat] = [];
+      groupes[cat].push(p);
+    });
+    sel.innerHTML = '<option value="">— Choisir —</option>' + ordre.filter(c => groupes[c] && groupes[c].length).map(cat =>
+      `<optgroup label="${cat}">${groupes[cat].map(p => `<option value="${escapeHtml(p.nom)}">${escapeHtml(p.nom)} — ${money(Number(p.prix))} (stock: ${p.stock})</option>`).join('')}</optgroup>`
+    ).join('');
     sel.value = current;
   }
 }
@@ -1175,6 +1191,7 @@ async function ajouterProduit(){
   const nom = document.getElementById('p-nom').value.trim();
   const prix = parseFloat(document.getElementById('p-prix').value);
   const stock = parseInt(document.getElementById('p-stock').value);
+  const categorie = document.getElementById('p-categorie').value;
   const errEl = document.getElementById('p-err');
   errEl.hidden = true;
   if(!nom || isNaN(prix) || prix < 0 || isNaN(stock) || stock < 0){
@@ -1182,7 +1199,7 @@ async function ajouterProduit(){
     errEl.hidden = false;
     return;
   }
-  const { error } = await sb.from('produits').insert({ nom, prix, stock });
+  const { error } = await sb.from('produits').insert({ nom, prix, stock, categorie });
   if(error){ errEl.textContent = 'Erreur : ' + error.message; errEl.hidden = false; return; }
   document.getElementById('p-nom').value = '';
   document.getElementById('p-prix').value = '';
@@ -1195,26 +1212,46 @@ async function renderProduitsListPatron(){
   window._produits = data || [];
   const el = document.getElementById('produits-list');
   if(!window._produits.length){ el.innerHTML = '<div class="empty">Aucun produit dans le catalogue.</div>'; return; }
-  el.innerHTML = window._produits.map(p => `<div class="week-block">
-    <div class="week-header"><span class="range">${escapeHtml(p.nom)}</span><span class="summary">${money(Number(p.prix))} · stock: ${p.stock}</span></div>
-    <div class="week-body" id="pedit-${p.id}" hidden>
-      <div class="field"><label>Nom</label><input id="pe-nom-${p.id}" type="text" value="${escapeHtml(p.nom)}"></div>
-      <div class="field"><label>Prix ($)</label><input id="pe-prix-${p.id}" type="number" min="0" step="0.01" value="${p.prix}"></div>
-      <div class="field"><label>Stock disponible</label><input id="pe-stock-${p.id}" type="number" min="0" value="${p.stock}"></div>
-      <button class="btn yellow" onclick="saveProduit('${p.id}')">Enregistrer</button>
-    </div>
-    <div style="display:flex; gap:8px; padding:0 16px 14px;">
-      <button class="btn ghost" onclick="document.getElementById('pedit-${p.id}').hidden = !document.getElementById('pedit-${p.id}').hidden">Modifier</button>
-      <button class="btn red" onclick="deleteProduit('${p.id}')">Supprimer</button>
-    </div>
-  </div>`).join('');
+
+  const ordre = ['Nourriture','Boisson','Autres'];
+  const groupes = {};
+  window._produits.forEach(p => {
+    const cat = ordre.includes(p.categorie) ? p.categorie : 'Autres';
+    if(!groupes[cat]) groupes[cat] = [];
+    groupes[cat].push(p);
+  });
+
+  el.innerHTML = ordre.filter(cat => groupes[cat] && groupes[cat].length).map(cat => `
+    <h3 style="font-size:14px; margin:16px 0 8px;">${cat}</h3>
+    ${groupes[cat].map(p => `<div class="week-block">
+      <div class="week-header"><span class="range">${escapeHtml(p.nom)}</span><span class="summary">${money(Number(p.prix))} · stock: ${p.stock}</span></div>
+      <div class="week-body" id="pedit-${p.id}" hidden>
+        <div class="field"><label>Nom</label><input id="pe-nom-${p.id}" type="text" value="${escapeHtml(p.nom)}"></div>
+        <div class="field"><label>Prix ($)</label><input id="pe-prix-${p.id}" type="number" min="0" step="0.01" value="${p.prix}"></div>
+        <div class="field"><label>Stock disponible</label><input id="pe-stock-${p.id}" type="number" min="0" value="${p.stock}"></div>
+        <div class="field"><label>Catégorie</label>
+          <select id="pe-cat-${p.id}">
+            <option value="Nourriture" ${p.categorie==='Nourriture'?'selected':''}>Nourriture</option>
+            <option value="Boisson" ${p.categorie==='Boisson'?'selected':''}>Boisson</option>
+            <option value="Autres" ${p.categorie==='Autres'?'selected':''}>Autres</option>
+          </select>
+        </div>
+        <button class="btn yellow" onclick="saveProduit('${p.id}')">Enregistrer</button>
+      </div>
+      <div style="display:flex; gap:8px; padding:0 16px 14px;">
+        <button class="btn ghost" onclick="document.getElementById('pedit-${p.id}').hidden = !document.getElementById('pedit-${p.id}').hidden">Modifier</button>
+        <button class="btn red" onclick="deleteProduit('${p.id}')">Supprimer</button>
+      </div>
+    </div>`).join('')}
+  `).join('');
 }
 
 async function saveProduit(id){
   const nom = document.getElementById('pe-nom-'+id).value.trim();
   const prix = parseFloat(document.getElementById('pe-prix-'+id).value);
   const stock = parseInt(document.getElementById('pe-stock-'+id).value);
-  const { error } = await sb.from('produits').update({ nom, prix, stock }).eq('id', id);
+  const categorie = document.getElementById('pe-cat-'+id).value;
+  const { error } = await sb.from('produits').update({ nom, prix, stock, categorie }).eq('id', id);
   if(error){ alert('Erreur : ' + error.message); return; }
   await renderProduitsListPatron();
 }
