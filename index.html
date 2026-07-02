@@ -226,6 +226,51 @@
   .week-body .mini-stats b{ display:block; font-size:16px; font-family:'Archivo Black',sans-serif; }
   .week-body .mini-stats .money b{ color:var(--green); }
   .week-body .mini-stats .perso b{ color:var(--red); }
+
+  /* ---------- catégories (facture / catalogue) ---------- */
+  .cat-label{
+    font-family:'Space Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--ink); background:var(--yellow); display:inline-block; padding:3px 8px; margin:16px 0 8px;
+  }
+  .cat-label:first-child{ margin-top:0; }
+  .receipt-cat-label{
+    font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--muted-2); border-bottom:1px solid var(--ink); padding:10px 0 4px; margin-top:4px;
+  }
+  .receipt-cat-label:first-child{ margin-top:0; }
+
+  /* ---------- sélecteur produit (bouton + menu) ---------- */
+  .produit-picker-btn{
+    width:100%; text-align:left; padding:10px 12px; border:1px solid var(--ink); background:#fff; color:var(--ink);
+    font-family:'Space Mono',monospace; font-size:13.5px; display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .produit-picker-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .produit-picker-btn .car{ color:var(--muted-2); flex-shrink:0; }
+
+  /* ---------- modal ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(23,22,15,0.72); z-index:1000;
+    display:flex; align-items:flex-start; justify-content:center; padding:40px 16px;
+    overflow-y:auto;
+  }
+  .modal-box{
+    background:var(--paper); color:var(--ink); width:100%; max-width:480px; padding:20px;
+    box-shadow:6px 6px 0 var(--ink);
+  }
+  .modal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .modal-header h3{ font-size:16px; }
+  .modal-close{ background:none; color:var(--ink); font-size:18px; font-family:'Space Mono',monospace; padding:2px 8px; }
+  .modal-search-wrap{ display:flex; gap:8px; margin-bottom:14px; }
+  .modal-search-wrap input{ flex:1; padding:10px 12px; border:1px solid var(--ink); background:#fff; color:var(--ink); font-size:13.5px; }
+  .modal-search-wrap .btn{ flex-shrink:0; padding:10px 14px; }
+  .produit-menu-list{ max-height:340px; overflow-y:auto; }
+  .produit-menu-item{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:11px 10px; border-bottom:1px solid var(--line); cursor:pointer;
+  }
+  .produit-menu-item:hover{ background:rgba(23,22,15,0.06); }
+  .produit-menu-item .pm-name{ font-weight:700; font-size:13.5px; }
+  .produit-menu-item .pm-meta{ font-family:'Space Mono',monospace; font-size:11.5px; color:var(--muted-2); text-align:right; flex-shrink:0; }
 </style>
 </head>
 <body>
@@ -312,9 +357,8 @@
         <div class="field" style="margin-bottom:0;"><label>Stock disponible</label><input id="p-stock" type="number" min="0" placeholder="2"></div>
         <div class="field" style="margin-bottom:0;"><label>Catégorie</label>
           <select id="p-categorie">
-            <option value="Nourriture">Nourriture</option>
-            <option value="Boisson">Boisson</option>
-            <option value="Autres">Autres</option>
+            <option value="Nourriture et Boisson">Nourriture et Boisson</option>
+            <option value="Collection">Collection</option>
           </select>
         </div>
         <button class="btn yellow" onclick="ajouterProduit()">Ajouter</button>
@@ -380,10 +424,17 @@
   <div class="panel" id="panel-factures" hidden>
     <div class="card">
       <h2><span class="eyebrow">01</span> Nouvelle facture</h2>
+      <div class="field">
+        <label>Catégorie</label>
+        <select id="f-categorie" onchange="onCategorieChange()"><option value="">— Choisir une catégorie —</option></select>
+      </div>
       <div class="facture-form">
         <div class="field" style="margin-bottom:0;">
           <label>Produit</label>
-          <select id="f-produit" onchange="updateFacturePreview()"><option value="">— Choisir —</option></select>
+          <button type="button" class="produit-picker-btn" id="f-produit-btn" disabled onclick="openProduitMenu()">
+            <span id="f-produit-btn-label">— Choisir une catégorie d'abord —</span><span class="car">▾</span>
+          </button>
+          <input type="hidden" id="f-produit-nom" value="">
         </div>
         <div class="field" style="margin-bottom:0;">
           <label>Quantité vendue</label>
@@ -396,6 +447,20 @@
         <button class="btn yellow" onclick="addFacture()">Ajouter</button>
       </div>
       <div id="f-err" class="err" hidden></div>
+    </div>
+
+    <div id="produit-modal" class="modal-overlay" hidden onclick="if(event.target.id==='produit-modal') closeProduitMenu()">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Choisir un produit</h3>
+          <button class="modal-close" onclick="closeProduitMenu()">✕</button>
+        </div>
+        <div class="modal-search-wrap">
+          <input id="produit-search" type="text" placeholder="Rechercher un produit..." oninput="filterProduitMenu()" onkeydown="if(event.key==='Enter') filterProduitMenu()">
+          <button type="button" class="btn yellow" onclick="filterProduitMenu()">Rechercher</button>
+        </div>
+        <div id="produit-menu-list" class="produit-menu-list"></div>
+      </div>
     </div>
 
     <div class="receipt">
@@ -484,6 +549,7 @@ const SB_ANON_KEY = 'ltd_sb_anon';
 const DEFAULT_URL = 'https://uweuexffoitzdqsbxlmc.supabase.co';
 const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3ZXVleGZmb2l0emRxc2J4bG1jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MjQzODcsImV4cCI6MjA5ODUwMDM4N30.fqSH9Tu6yx9D8dgn7k9iLat-hnJAWatmdqxKYFwkJc0';
 let currentUser = null;
+const CATEGORIES = ['Nourriture et Boisson', 'Collection'];
 
 async function sha256Hex(str){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -503,6 +569,7 @@ async function doLogin(){
   document.getElementById('login-screen').hidden = true;
   if(data.role === 'patron'){
     document.getElementById('patron-app').hidden = false;
+    await loadCatalogue();
     await loadTravailleurs();
   } else {
     document.getElementById('app').hidden = false;
@@ -537,6 +604,20 @@ async function createTravailleur(){
   await loadTravailleurs();
 }
 
+function renderFacturesGrouped(facs){
+  const groupes = {};
+  facs.forEach(f => {
+    const cat = categorieForNom(f.nom);
+    if(!groupes[cat]) groupes[cat] = [];
+    groupes[cat].push(f);
+  });
+  const ordreCats = [...CATEGORIES, 'Sans catégorie'].filter(c => groupes[c] && groupes[c].length);
+  return ordreCats.map(cat => `
+    <div class="receipt-cat-label">${escapeHtml(cat)}</div>
+    ${groupes[cat].map(f=>`<div class="receipt-line"><span class="name">${escapeHtml(f.nom)}</span><span class="qty">x${f.quantite}</span><span class="dots"></span><span class="amt">${money(Number(f.prix_total))}</span></div>`).join('')}
+  `).join('');
+}
+
 async function openTravailleur(id){
   const t = window._travailleurs.find(x => x.id === id);
   const [sRes, fRes, lRes] = await Promise.all([
@@ -558,7 +639,7 @@ async function openTravailleur(id){
       <div class="stat-card perso"><div class="eyebrow">Chiffre personnel (20%)</div><div class="num">${money(perso)}</div></div>
     </div>
     <div class="card"><h2>Heures de service (total)</h2><div>${formatDuration(totalSecs).slice(0,5)}</div></div>
-    <div class="card"><h2>Détail factures</h2>${facs.length ? facs.map(f=>`<div class="receipt-line"><span class="name">${escapeHtml(f.nom)}</span><span class="qty">x${f.quantite}</span><span class="dots"></span><span class="amt">${money(Number(f.prix_total))}</span></div>`).join('') : '<div class="empty">Aucune facture.</div>'}</div>
+    <div class="card"><h2>Détail factures</h2>${facs.length ? renderFacturesGrouped(facs) : '<div class="empty">Aucune facture.</div>'}</div>
     <div class="card"><h2>Détail livraisons</h2>${livs.length ? livs.map(l=>`<div class="week-block"><div class="week-header"><span class="range">${new Date(l.heure_depart).toLocaleString('fr-FR')} → ${new Date(l.heure_retour).toLocaleString('fr-FR')}</span><span class="summary">${money(Number(l.total))}</span></div><div class="week-body">${l.produits.map(p=>`<div class="receipt-line"><span class="name">${escapeHtml(p.nom)}</span><span class="qty">x${p.quantite}</span><span class="dots"></span><span class="amt">${money(Number(p.prix))}</span></div>`).join('')}</div></div>`).join('') : '<div class="empty">Aucune livraison.</div>'}</div>
   `;
   document.getElementById('travailleurs-list-wrap').hidden = true;
@@ -879,22 +960,22 @@ function renderServicesHistory(){
 
 // ---------- factures ----------
 async function addFacture(){
-  const sel = document.getElementById('f-produit');
-  const nom = sel.value;
+  const nom = document.getElementById('f-produit-nom').value;
   const qte = parseFloat(document.getElementById('f-qte').value);
   const prix = parseFloat(document.getElementById('f-prix').value);
   const errEl = document.getElementById('f-err');
   errEl.hidden = true;
 
   if(!nom || !qte || qte <= 0 || isNaN(prix) || prix < 0){
-    errEl.textContent = "Choisis un produit et une quantité valide.";
+    errEl.textContent = "Choisis une catégorie, un produit et une quantité valide.";
     errEl.hidden = false;
     return;
   }
   try{
     const { error } = await sb.from('factures').insert({ nom, quantite: qte, prix_total: prix, travailleur_id: currentUser.id });
     if(error) throw error;
-    sel.value = '';
+    document.getElementById('f-produit-nom').value = '';
+    document.getElementById('f-produit-btn-label').textContent = currentCategorieFacture ? '— Choisir un produit —' : '— Choisir une catégorie d\'abord —';
     document.getElementById('f-qte').value = '';
     document.getElementById('f-prix').value = '';
     await loadAll();
@@ -905,9 +986,9 @@ async function addFacture(){
 }
 
 function updateFacturePreview(){
-  const sel = document.getElementById('f-produit');
+  const nom = document.getElementById('f-produit-nom').value;
   const qte = parseFloat(document.getElementById('f-qte').value) || 0;
-  const p = (window._catalogue || []).find(x => x.nom === sel.value);
+  const p = (window._catalogue || []).find(x => x.nom === nom);
   const total = p ? p.prix * qte : 0;
   document.getElementById('f-prix').value = total ? total.toFixed(2) : '';
 }
@@ -915,21 +996,81 @@ function updateFacturePreview(){
 async function loadCatalogue(){
   const { data } = await sb.from('produits').select('*').order('nom');
   window._catalogue = data || [];
-  const sel = document.getElementById('f-produit');
-  if(sel){
-    const current = sel.value;
-    const ordre = ['Nourriture','Boisson','Autres'];
-    const groupes = {};
-    window._catalogue.forEach(p => {
-      const cat = ordre.includes(p.categorie) ? p.categorie : 'Autres';
-      if(!groupes[cat]) groupes[cat] = [];
-      groupes[cat].push(p);
-    });
-    sel.innerHTML = '<option value="">— Choisir —</option>' + ordre.filter(c => groupes[c] && groupes[c].length).map(cat =>
-      `<optgroup label="${cat}">${groupes[cat].map(p => `<option value="${escapeHtml(p.nom)}">${escapeHtml(p.nom)} — ${money(Number(p.prix))} (stock: ${p.stock})</option>`).join('')}</optgroup>`
-    ).join('');
-    sel.value = current;
+  populateCategorieSelect();
+}
+
+function categorieOf(p){
+  return CATEGORIES.includes(p.categorie) ? p.categorie : 'Collection';
+}
+
+function categorieForNom(nom){
+  const p = (window._catalogue || []).find(x => x.nom === nom);
+  return p ? categorieOf(p) : 'Sans catégorie';
+}
+
+let currentCategorieFacture = '';
+
+function populateCategorieSelect(){
+  const sel = document.getElementById('f-categorie');
+  if(!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Choisir une catégorie —</option>' +
+    CATEGORIES.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = current;
+  onCategorieChange();
+}
+
+function onCategorieChange(){
+  const sel = document.getElementById('f-categorie');
+  if(!sel) return;
+  currentCategorieFacture = sel.value;
+  document.getElementById('f-produit-nom').value = '';
+  document.getElementById('f-qte').value = '';
+  document.getElementById('f-prix').value = '';
+  const btn = document.getElementById('f-produit-btn');
+  const label = document.getElementById('f-produit-btn-label');
+  if(currentCategorieFacture){
+    btn.disabled = false;
+    label.textContent = '— Choisir un produit —';
+  } else {
+    btn.disabled = true;
+    label.textContent = '— Choisir une catégorie d\'abord —';
   }
+}
+
+function openProduitMenu(){
+  if(!currentCategorieFacture) return;
+  document.getElementById('produit-search').value = '';
+  renderProduitMenuList('');
+  document.getElementById('produit-modal').hidden = false;
+  setTimeout(() => document.getElementById('produit-search').focus(), 0);
+}
+
+function closeProduitMenu(){
+  document.getElementById('produit-modal').hidden = true;
+}
+
+function filterProduitMenu(){
+  renderProduitMenuList(document.getElementById('produit-search').value.trim().toLowerCase());
+}
+
+function renderProduitMenuList(term){
+  const list = (window._catalogue || []).filter(p => categorieOf(p) === currentCategorieFacture && (!term || p.nom.toLowerCase().includes(term)));
+  const el = document.getElementById('produit-menu-list');
+  if(!list.length){ el.innerHTML = '<div class="empty">Aucun produit trouvé.</div>'; return; }
+  el.innerHTML = list.map(p => `<div class="produit-menu-item" onclick="selectProduitFacture('${p.id}')">
+    <span class="pm-name">${escapeHtml(p.nom)}</span>
+    <span class="pm-meta">${money(Number(p.prix))} · stock: ${p.stock}</span>
+  </div>`).join('');
+}
+
+function selectProduitFacture(id){
+  const p = (window._catalogue || []).find(x => String(x.id) === String(id));
+  if(!p) return;
+  document.getElementById('f-produit-nom').value = p.nom;
+  document.getElementById('f-produit-btn-label').textContent = p.nom;
+  closeProduitMenu();
+  updateFacturePreview();
 }
 
 async function deleteFacture(id){
@@ -952,16 +1093,24 @@ function renderFactures(){
     return;
   }
   let total = 0;
-  listEl.innerHTML = factures.map(f => {
+  const groupes = {};
+  factures.forEach(f => {
     total += Number(f.prix_total);
-    return `<div class="receipt-line">
+    const cat = categorieForNom(f.nom);
+    if(!groupes[cat]) groupes[cat] = [];
+    groupes[cat].push(f);
+  });
+  const ordreCats = [...CATEGORIES, 'Sans catégorie'].filter(c => groupes[c] && groupes[c].length);
+  listEl.innerHTML = ordreCats.map(cat => `
+    <div class="receipt-cat-label">${escapeHtml(cat)}</div>
+    ${groupes[cat].map(f => `<div class="receipt-line">
       <span class="name">${escapeHtml(f.nom)}</span>
       <span class="qty">x${f.quantite}</span>
       <span class="dots"></span>
       <span class="amt">${money(Number(f.prix_total))}</span>
       <button class="del" onclick="deleteFacture('${f.id}')">suppr.</button>
-    </div>`;
-  }).join('');
+    </div>`).join('')}
+  `).join('');
   totalEl.textContent = money(total);
 }
 
@@ -1213,16 +1362,16 @@ async function renderProduitsListPatron(){
   const el = document.getElementById('produits-list');
   if(!window._produits.length){ el.innerHTML = '<div class="empty">Aucun produit dans le catalogue.</div>'; return; }
 
-  const ordre = ['Nourriture','Boisson','Autres'];
+  const ordre = [...CATEGORIES, 'Sans catégorie'];
   const groupes = {};
   window._produits.forEach(p => {
-    const cat = ordre.includes(p.categorie) ? p.categorie : 'Autres';
+    const cat = CATEGORIES.includes(p.categorie) ? p.categorie : 'Sans catégorie';
     if(!groupes[cat]) groupes[cat] = [];
     groupes[cat].push(p);
   });
 
   el.innerHTML = ordre.filter(cat => groupes[cat] && groupes[cat].length).map(cat => `
-    <h3 style="font-size:14px; margin:16px 0 8px;">${cat}</h3>
+    <div class="cat-label">${escapeHtml(cat)}</div>
     ${groupes[cat].map(p => `<div class="week-block">
       <div class="week-header"><span class="range">${escapeHtml(p.nom)}</span><span class="summary">${money(Number(p.prix))} · stock: ${p.stock}</span></div>
       <div class="week-body" id="pedit-${p.id}" hidden>
@@ -1231,9 +1380,8 @@ async function renderProduitsListPatron(){
         <div class="field"><label>Stock disponible</label><input id="pe-stock-${p.id}" type="number" min="0" value="${p.stock}"></div>
         <div class="field"><label>Catégorie</label>
           <select id="pe-cat-${p.id}">
-            <option value="Nourriture" ${p.categorie==='Nourriture'?'selected':''}>Nourriture</option>
-            <option value="Boisson" ${p.categorie==='Boisson'?'selected':''}>Boisson</option>
-            <option value="Autres" ${p.categorie==='Autres'?'selected':''}>Autres</option>
+            <option value="Nourriture et Boisson" ${p.categorie==='Nourriture et Boisson'?'selected':''}>Nourriture et Boisson</option>
+            <option value="Collection" ${p.categorie==='Collection'?'selected':''}>Collection</option>
           </select>
         </div>
         <button class="btn yellow" onclick="saveProduit('${p.id}')">Enregistrer</button>
