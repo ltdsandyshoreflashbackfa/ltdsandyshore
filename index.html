@@ -274,6 +274,7 @@
     <button class="tab active" data-ptab="travailleur" onclick="switchPTab('travailleur')">Travailleur</button>
     <button class="tab" data-ptab="gestion" onclick="switchPTab('gestion')">Gestion Travailleur</button>
     <button class="tab" data-ptab="livraison" onclick="switchPTab('livraison')">Livraison</button>
+    <button class="tab" data-ptab="stock" onclick="switchPTab('stock')">Gestion Stock</button>
   </div>
 
   <div class="panel" id="ppanel-travailleur">
@@ -281,7 +282,7 @@
       <div class="card"><h2>Travailleurs</h2><div id="travailleurs-list"></div></div>
     </div>
     <div id="travailleur-detail-wrap" hidden>
-      <button class="btn ghost" style="margin-bottom:14px;" onclick="backToList()">← Retour</button>
+      <button class="btn yellow" style="margin-bottom:14px;" onclick="backToList()">← Retour à la liste des travailleurs</button>
       <div id="travailleur-detail"></div>
     </div>
   </div>
@@ -300,6 +301,11 @@
 
   <div class="panel" id="ppanel-livraison" hidden>
     <div class="card"><h2>Toutes les livraisons</h2><div id="patron-livraisons-list"></div></div>
+  </div>
+
+  <div class="panel" id="ppanel-stock" hidden>
+    <div class="card"><h2>Ruptures de stock signalées</h2><div id="patron-stock-list"></div></div>
+    <div class="card"><h2>Historique résolu</h2><div id="patron-stock-resolu"></div></div>
   </div>
 </div>
 
@@ -325,6 +331,7 @@
     <button class="tab" data-tab="chiffres" onclick="switchTab('chiffres')">Chiffres</button>
     <button class="tab" data-tab="recherche" onclick="switchTab('recherche')">Recherche</button>
     <button class="tab" data-tab="livraison" onclick="switchTab('livraison')">Livraison</button>
+    <button class="tab" data-tab="stock" onclick="switchTab('stock')">Stock</button>
   </div>
 
   <!-- ---- SERVICES ---- -->
@@ -439,6 +446,17 @@
       <div id="l-err" class="err" hidden></div>
     </div>
     <div class="card"><h2>Historique de mes livraisons</h2><div id="livraisons-list"></div></div>
+  </div>
+
+  <div class="panel" id="panel-stock" hidden>
+    <div class="card">
+      <h2>Signaler une rupture de stock</h2>
+      <div class="facture-form" style="grid-template-columns:1fr auto;">
+        <div class="field" style="margin-bottom:0;"><label>Produit en rupture</label><input id="s-produit" type="text" placeholder="Ex: Burger" onkeydown="if(event.key==='Enter') envoyerStock()"></div>
+        <button class="btn yellow" onclick="envoyerStock()">Envoyer</button>
+      </div>
+    </div>
+    <div class="card"><h2>Mes signalements</h2><div id="mes-stocks-list"></div></div>
   </div>
 </div>
 
@@ -640,18 +658,20 @@ function renderAll(){
 // ---------- tabs ----------
 function switchTab(tab){
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  ['services','factures','chiffres','recherche','livraison'].forEach(p => {
+  ['services','factures','chiffres','recherche','livraison','stock'].forEach(p => {
     document.getElementById('panel-' + p).hidden = (p !== tab);
   });
+  if(tab === 'stock') loadMesStocks();
 }
 
 function switchPTab(tab){
   document.querySelectorAll('[data-ptab]').forEach(t => t.classList.toggle('active', t.dataset.ptab === tab));
-  ['travailleur','gestion','livraison'].forEach(p => {
+  ['travailleur','gestion','livraison','stock'].forEach(p => {
     document.getElementById('ppanel-' + p).hidden = (p !== tab);
   });
   if(tab === 'gestion') renderGestionList();
   if(tab === 'livraison') loadPatronLivraisons();
+  if(tab === 'stock') loadPatronStock();
 }
 
 // ---------- pointeuse ----------
@@ -1115,6 +1135,43 @@ async function loadPatronLivraisons(){
   el.innerHTML = data.map(l => `<div class="week-block"><div class="week-header"><span class="range">${escapeHtml(l.travailleurs ? l.travailleurs.nom_complet : '—')}</span><span class="summary">${new Date(l.heure_depart).toLocaleString('fr-FR')} → ${new Date(l.heure_retour).toLocaleString('fr-FR')} · ${money(Number(l.total))}</span></div>
     <div class="week-body">${l.produits.map(p => `<div class="receipt-line"><span class="name">${escapeHtml(p.nom)}</span><span class="qty">x${p.quantite}</span><span class="dots"></span><span class="amt">${money(Number(p.prix))}</span></div>`).join('')}</div>
   </div>`).join('');
+}
+
+// ---------- stock ----------
+async function envoyerStock(){
+  const produit = document.getElementById('s-produit').value.trim();
+  if(!produit) return;
+  const { error } = await sb.from('stocks').insert({ travailleur_id: currentUser.id, produit, statut: 'en_rupture' });
+  if(error){ alert('Erreur : ' + error.message); return; }
+  document.getElementById('s-produit').value = '';
+  await loadMesStocks();
+}
+
+async function loadMesStocks(){
+  const { data } = await sb.from('stocks').select('*').eq('travailleur_id', currentUser.id).order('created_at', { ascending:false });
+  const el = document.getElementById('mes-stocks-list');
+  if(!data || !data.length){ el.innerHTML = '<div class="empty">Aucun signalement.</div>'; return; }
+  el.innerHTML = data.map(s => `<div class="week-block"><div class="week-header"><span class="range">${escapeHtml(s.produit)}</span><span class="summary">${s.statut === 'resolu' ? '✔ Résolu' : 'En rupture'}</span></div></div>`).join('');
+}
+
+async function loadPatronStock(){
+  const [{ data: enRupture }, { data: resolus }] = await Promise.all([
+    sb.from('stocks').select('*, travailleurs(nom_complet)').eq('statut','en_rupture').order('created_at', { ascending:false }),
+    sb.from('stocks').select('*, travailleurs(nom_complet)').eq('statut','resolu').order('resolu_at', { ascending:false })
+  ]);
+  const elA = document.getElementById('patron-stock-list');
+  elA.innerHTML = (enRupture && enRupture.length) ? enRupture.map(s => `<div class="week-block"><div class="week-header"><span class="range">${escapeHtml(s.produit)}</span><span class="summary">${escapeHtml(s.travailleurs ? s.travailleurs.nom_complet : '—')}</span></div>
+    <div style="padding:0 16px 14px;"><button class="btn yellow" onclick="ravitaillerStock('${s.id}')">Ravitailler</button></div>
+  </div>`).join('') : '<div class="empty">Aucune rupture en attente.</div>';
+
+  const elB = document.getElementById('patron-stock-resolu');
+  elB.innerHTML = (resolus && resolus.length) ? resolus.map(s => `<div class="week-block"><div class="week-header"><span class="range">${escapeHtml(s.produit)}</span><span class="summary">${escapeHtml(s.travailleurs ? s.travailleurs.nom_complet : '—')} · ✔ Résolu</span></div></div>`).join('') : '<div class="empty">Rien pour le moment.</div>';
+}
+
+async function ravitaillerStock(id){
+  const { error } = await sb.from('stocks').update({ statut: 'resolu', resolu_at: new Date().toISOString() }).eq('id', id);
+  if(error){ alert('Erreur : ' + error.message); return; }
+  await loadPatronStock();
 }
 </script>
 
